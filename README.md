@@ -2,7 +2,47 @@
 
 AI-powered annual report analysis using Large Language Models — upload a PDF, get structured KPIs, risk flags, footnote inconsistencies, and a chat interface.
 
+## ✨ Recent Updates (Latest Release)
+
+### 🚀 Performance Improvements
+- **3x Faster PDF Detection** — Optimized from 10-15s to 3-5s
+  - Reduced pages scanned (6→3)
+  - Pattern-based quick extraction for common fields
+  - 60% reduction in LLM token usage
+  - Smarter retry logic (2 attempts vs 3)
+
+### 📊 Enhanced Dashboard
+- **Real-Time Financial Comparison Chart**
+  - Replace mock data with actual KPIs from processed reports
+  - Interactive company selector (choose any 3 companies)
+  - Shows real Revenue, Expenses, and Profit
+  - Auto-updates when new reports complete
+
+- **Live AI Risk Feed**
+  - Displays actual risks from completed filings
+  - Sorted by severity (Critical → High → Medium → Low)
+  - Real company names and detection timestamps
+
+- **Smart Auto-Refresh**
+  - 5-second refresh during processing
+  - 30-second refresh when idle
+  - Intelligent caching (KPIs: 1min, Risks: 5min)
+
+### 🐛 Bug Fixes
+- Fixed missing company names in filing detail pages
+- Fixed React Hook order violations
+- Added missing icon imports
+- Corrected dashboard schema to include company data
+
+### 🎨 UX Enhancements
+- Default alphabetical company sorting
+- Visual feedback on company selection
+- Max 3 companies for clear chart comparison
+- Improved loading states and error handling
+
 ## Features
+
+### Core Capabilities
 - Multi-modal PDF ingestion (text, tables, charts)
 - Adaptive chunking & semantic embeddings
 - KPI extraction with deterministic verification (28 canonical KPIs, Indian INDAS aliases)
@@ -13,22 +53,29 @@ AI-powered annual report analysis using Large Language Models — upload a PDF, 
 - Auto peer discovery via embedding similarity
 - React dashboard with chat interface
 
+### Dashboard Features
+- **Interactive Financial Comparison** — Select up to 3 companies and compare Revenue, Expenses, Profit
+- **Real-Time Metrics** — Latest fiscal year, currency, alerts, and processed filings count
+- **AI Risk Feed** — Live display of critical risks from processed reports
+- **Smart Auto-Refresh** — Faster updates during processing, efficient caching when idle
+- **Company Management** — Track companies, view processing status, manage multiple years
+
 ## Tech Stack
 - **Backend**: Python 3.11, FastAPI, Celery
 - **PDF/Tables**: PyMuPDF, pdfplumber, Camelot
 - **Embeddings**: sentence-transformers (`all-MiniLM-L6-v2`) + ChromaDB
 - **LLM**: OpenAI-compatible API (Gemini by default, swappable to OpenAI)
 - **DB**: SQLite (dev) / PostgreSQL (prod)
-- **Frontend**: React 18 + Vite + Recharts + TailwindCSS
+- **Frontend**: React 18 + Vite + Recharts + React Query + TailwindCSS
 - **Scheduler**: Celery + Redis
 
 ---
 
-## Local Development
+## 🚀 Quick Start
 
 ```bash
 # 1. Clone
-git clone <repo-url>
+git clone https://github.com/surendra5153/annual-report-analyzer.git
 cd annual-report-analyzer
 
 # 2. Backend
