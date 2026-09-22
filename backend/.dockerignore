@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Don't bake secrets into the image — injected via env_file at runtime
+.env
+
+# Local data dirs — mounted as volumes
+uploads/
+chroma_db/
+*.db
+*.sqlite
+
+# Dev/test files
+venv/
+.venv/
+test_*.py
+check_imports.py
+
+# Logs
+*.log
