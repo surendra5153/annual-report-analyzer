@@ -1,0 +1,43 @@
+{
+  "description": "TEST set v2 (frozen). Harder and more natural than v1: paraphrased questions, computed ratios (not printed in the statements), growth rates, narrative questions and new unanswerables. Every gold value was read from the cited statement page's text (independent of the table reader). No item duplicates a dev-set item for the same report. Run once per final configuration.",
+  "filings": {
+    "adarsh26": {"id": "1c9e78bb-0f90-4881-9af9-83979c582e1a", "company": "Adarsh Plant Protect", "unit": "lakh"},
+    "adani25":  {"id": "9a88fab0-2586-44d2-b151-c9c65e144db9", "company": "Adani Enterprises FY25", "unit": "crore"},
+    "adani26":  {"id": "305f94a3-cb9e-41c1-816b-6b542d8ed933", "company": "Adani Enterprises FY26", "unit": "crore"},
+    "hal26":    {"id": "9820853e-5875-42a8-8001-2ad123f1b432", "company": "Hindustan Aeronautics FY26", "unit": "lakh"},
+    "hal25":    {"id": "45b2e41b-a5b7-4f11-9374-a46e2fdfd974", "company": "Hindustan Aeronautics FY25", "unit": "lakh"},
+    "airtel26": {"id": "8566cb3c-d316-44fb-9636-7c2f391c6f48", "company": "Bharti Airtel FY26", "unit": "million"}
+  },
+  "questions": [
+    {"id": "v01", "filing": "hal25", "question": "How much did HAL spend on its employees in FY 2024-25 (consolidated)?", "kind": "amount", "value": 573037, "evidence": "p.328: Employee Benefits Expense 573037 (₹ lakh)"},
+    {"id": "v02", "filing": "hal26", "question": "What was HAL's consolidated depreciation and amortisation expense for FY 2025-26?", "kind": "amount", "value": 135486, "evidence": "p.321: Depreciation and Amortization Expense 135486"},
+    {"id": "v03", "filing": "hal26", "question": "What were HAL's consolidated cash and cash equivalents as at 31 March 2026?", "kind": "amount", "value": 376766, "evidence": "p.319: Cash and Cash Equivalents 376766"},
+    {"id": "v04", "filing": "hal26", "question": "What was HAL's consolidated current ratio (current assets divided by current liabilities) as at 31 March 2026?", "kind": "ratio", "value": 2.61, "tolerance": 0.02, "evidence": "p.319/320: 11583796 / 4430737 = 2.61"},
+    {"id": "v05", "filing": "hal26", "question": "What were the consolidated other expenses in FY 2025-26?", "kind": "amount", "value": 209616, "evidence": "p.321: Other Expenses 209616"},
+    {"id": "v06", "filing": "hal26", "question": "What was the consolidated total equity as at 31 March 2026?", "kind": "amount", "value": 4104460, "evidence": "p.320: Total equity 4104460"},
+    {"id": "v07", "filing": "hal25", "question": "What was the consolidated profit before tax in FY 2024-25?", "kind": "amount", "value": 1086726, "evidence": "p.328: Profit/(loss) before tax 1086726"},
+    {"id": "v08", "filing": "hal25", "question": "What were the consolidated inventories as at 31 March 2025?", "kind": "amount", "value": 2167570, "evidence": "p.326: Inventories 2167570"},
+    {"id": "v09", "filing": "hal25", "question": "How much cash and cash equivalents did HAL hold at the end of FY 2024-25 on a consolidated basis?", "kind": "amount", "value": 454855, "evidence": "p.326: Cash and Cash Equivalents 454855"},
+    {"id": "v10", "filing": "airtel26", "question": "What was Bharti Airtel's consolidated profit before tax for FY 2025-26?", "kind": "amount", "value": 451727, "evidence": "p.216: Profit before tax 451,727 (₹ million)"},
+    {"id": "v11", "filing": "airtel26", "question": "How much did Airtel spend on depreciation and amortisation in FY 2025-26?", "kind": "amount", "value": 527108, "evidence": "p.216: Depreciation and amortisation expenses 527,108"},
+    {"id": "v12", "filing": "airtel26", "question": "What were the consolidated finance costs for FY 2025-26?", "kind": "amount", "value": 215553, "evidence": "p.216: Finance costs 215,553"},
+    {"id": "v13", "filing": "airtel26", "question": "How much did Airtel pay in licence fee and spectrum charges in FY 2025-26?", "kind": "amount", "value": 153729, "evidence": "p.216: License fee / Spectrum charges 153,729"},
+    {"id": "v14", "filing": "airtel26", "question": "By what percentage did consolidated revenue from operations grow in FY 2025-26?", "kind": "percent", "value": 21.96, "tolerance": 0.3, "evidence": "p.216: 2,109,728 vs 1,729,852 → +21.96%"},
+    {"id": "v15", "filing": "adani26", "question": "What were Adani Enterprises' consolidated trade receivables as at March 31, 2026?", "kind": "amount", "value": 12542.61, "evidence": "p.283: Trade Receivables 12,542.61 (₹ crore)"},
+    {"id": "v16", "filing": "adani26", "question": "How much cash and cash equivalents did the group hold on a consolidated basis at March 31, 2026?", "kind": "amount", "value": 6266.67, "evidence": "p.283: Cash & Cash Equivalents 6,266.67"},
+    {"id": "v17", "filing": "adani26", "question": "What were the consolidated non-current borrowings as at March 31, 2026?", "kind": "amount", "value": 76166.15, "evidence": "p.283: Non-current Borrowings 76,166.15"},
+    {"id": "v18", "filing": "adani25", "question": "What was the consolidated depreciation, amortisation and impairment expense for FY 2024-25?", "kind": "amount", "value": 4211.33, "evidence": "p.392: Depreciation, Amortisation & Impairment Expense 4,211.33"},
+    {"id": "v19", "filing": "adani25", "question": "What was the consolidated cost of materials consumed in FY 2024-25?", "kind": "amount", "value": 9710.55, "evidence": "p.392: Cost of Materials Consumed 9,710.55"},
+    {"id": "v20", "filing": "adani25", "question": "What was the consolidated net profit margin (profit for the year as a percentage of total income) in FY 2024-25?", "kind": "percent", "value": 7.98, "tolerance": 0.1, "evidence": "p.392: 8,004.99 / 1,00,365.08 = 7.98%"},
+    {"id": "v21", "filing": "adarsh26", "question": "What were the total assets as at 31 March 2026?", "kind": "amount", "value": 848.87, "evidence": "p.72: TOTAL ASSETS 848.87 (₹ lakh)"},
+    {"id": "v22", "filing": "adarsh26", "question": "What was the total equity at the end of FY 2025-26?", "kind": "amount", "value": 28.63, "evidence": "p.72: Total Equity 28.63"},
+    {"id": "v23", "filing": "adarsh26", "question": "What was the current ratio as at 31 March 2026?", "kind": "ratio", "value": 1.53, "tolerance": 0.02, "evidence": "p.72: 712.32 / 466.00 = 1.53"},
+    {"id": "v24", "filing": "adarsh26", "question": "What was the total comprehensive income for FY 2025-26?", "kind": "amount", "value": -1.98, "evidence": "p.57: Total Comprehensive Income (1.98)"},
+    {"id": "v25", "filing": "adarsh26", "question": "Who are the statutory auditors of the company?", "kind": "text", "accept": ["mukund"], "evidence": "p.4/p.63: M/s. Mukund & Rohit and M/s Mukund Patel & Co."},
+    {"id": "v26", "filing": "adarsh26", "question": "What is the company's BSE scrip code?", "kind": "text", "accept": ["526711"], "evidence": "p.1: Scrip Code: 526711"},
+    {"id": "vu1", "filing": "airtel26", "question": "What was Airtel's revenue from operations in FY 2019-20?", "kind": "unanswerable"},
+    {"id": "vu2", "filing": "hal26", "question": "How many employees work in HAL's Mars division?", "kind": "unanswerable"},
+    {"id": "vu3", "filing": "adani26", "question": "What was the consolidated revenue from the company's cryptocurrency mining business?", "kind": "unanswerable"},
+    {"id": "vu4", "filing": "adarsh26", "question": "What is the company's market capitalisation on the NASDAQ?", "kind": "unanswerable"}
+  ]
+}

@@ -120,6 +120,9 @@ class KPI(Base):
     is_verified       = Column(Boolean, default=False)
     verification_note = Column(Text, nullable=True)
     category          = Column(String(100), nullable=True)
+    # As printed in the report, before unit normalisation (value is ₹ crore / x / % / ₹ per share)
+    raw_value         = Column(Float, nullable=True)
+    source_unit       = Column(String(20), nullable=True)   # crore / lakh / million … detected from the report
     created_at        = Column(DateTime, server_default=func.now())
 
     filing = relationship("Filing", back_populates="kpis")

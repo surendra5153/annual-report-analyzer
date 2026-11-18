@@ -2,21 +2,21 @@
 Centralised LLM client.
 
 All engines import `chat_complete` and `chat_complete_json` from here instead
-of creating their own OpenAI() instances. This means switching providers
-(OpenAI ↔ Gemini ↔ anything OpenAI-compatible) requires changing exactly one
-file — this one — not seven.
+of creating their own OpenAI() instances. The default target is a LOCAL Ollama
+server (OpenAI-compatible API at localhost:11434/v1) running our fine-tuned
+model, so the runtime makes zero cloud calls. Any OpenAI-compatible endpoint
+still works by changing OPENAI_BASE_URL / OPENAI_MODEL.
 
 Retry behaviour
 ---------------
-Free-tier Gemini allows ~15 req/min on Flash-Lite and ~10 req/min on Flash.
-We wrap every call with exponential back-off (2 s → 4 s → 8 s, up to 3
-retries) so a brief 429 never kills the whole pipeline.
+Transient 429 / 503 errors (remote providers, or Ollama while a model loads)
+are retried with exponential back-off.
 """
 
 import time
 import json
 import re
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from openai import OpenAI, RateLimitError, APIStatusError
 from loguru import logger
@@ -25,9 +25,14 @@ from app.core.config import settings
 
 # ── Single shared client (module-level singleton) ─────────────────────────
 _client = OpenAI(
-    api_key=settings.openai_api_key,
+    api_key=settings.openai_api_key or "ollama",
     base_url=settings.openai_base_url or None,  # None → default OpenAI URL
+    timeout=settings.llm_timeout_seconds,
 )
+
+# Ollama's OpenAI layer supports response_format=json_object (constrained JSON
+# decoding), which makes small local models far more reliable at emitting JSON.
+_IS_LOCAL = "localhost" in (settings.openai_base_url or "") or "127.0.0.1" in (settings.openai_base_url or "")
 
 
 # ── Retry wrapper ─────────────────────────────────────────────────────────
@@ -95,10 +100,10 @@ def chat_complete_json(
     """
     JSON-object completion. Returns the parsed Python object.
 
-    Does NOT pass response_format=json_object — Gemini's OpenAI-compat layer
-    sometimes returns None content when that flag is set. Instead we instruct
-    the model via the system message and parse the raw text ourselves,
-    stripping any markdown fences Gemini occasionally wraps around JSON.
+    On a local Ollama server we pass response_format=json_object (constrained
+    decoding). Remote providers (e.g. Gemini's compat layer) sometimes return
+    None content with that flag, so for them we rely on the system nudge and
+    parse the raw text ourselves, stripping any markdown fences.
     """
     # Inject a system nudge to guarantee JSON output without the API flag
     forced_messages = list(messages)
@@ -114,13 +119,16 @@ def chat_complete_json(
                 forced_messages[i] = {**m, "content": m["content"] + f"\n\n{json_instruction}"}
                 break
 
+    if _IS_LOCAL:
+        kwargs.setdefault("response_format", {"type": "json_object"})
+
     resp = _call_with_retry(
         _client.chat.completions.create,
         model=model or settings.openai_model,
         messages=forced_messages,
         temperature=temperature,
         max_tokens=max_tokens,
-        **kwargs,  # no response_format here
+        **kwargs,
     )
     raw = resp.choices[0].message.content or ""
 
@@ -156,6 +164,30 @@ def chat_complete_json(
         return {}
 
 
+def chat_stream(
+    messages: list[dict],
+    *,
+    model: Optional[str] = None,
+    temperature: float = 0,
+    max_tokens: int = 1000,
+) -> Iterator[str]:
+    """
+    Streaming completion. Yields text deltas as they are generated
+    (used by the SSE chat endpoint).
+    """
+    stream = _call_with_retry(
+        _client.chat.completions.create,
+        model=model or settings.openai_model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=True,
+    )
+    for event in stream:
+        if event.choices and event.choices[0].delta.content:
+            yield event.choices[0].delta.content
+
+
 def vision_complete(
     text_prompt: str,
     image_b64: str,
@@ -165,8 +197,11 @@ def vision_complete(
 ) -> str:
     """
     Vision completion — describe an image given a text prompt.
-    Returns the assistant message as a string.
+    Returns the assistant message as a string, or "" when no vision model is
+    configured (the default for the local runtime).
     """
+    if not (model or settings.openai_vision_model):
+        return ""
     resp = _call_with_retry(
         _client.chat.completions.create,
         model=model or settings.openai_vision_model,

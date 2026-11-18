@@ -87,6 +87,8 @@ class KPIOut(BaseModel):
     is_verified: bool
     verification_note: Optional[str]
     category: Optional[str]
+    raw_value: Optional[float] = None
+    source_unit: Optional[str] = None
 
     class Config:
         from_attributes = True

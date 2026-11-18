@@ -46,9 +46,9 @@ def get_chroma_client() -> chromadb.PersistentClient:
     return _chroma_client
 
 
-def _get_or_create_collection(name: str = "annual_reports"):
+def _get_or_create_collection(name: Optional[str] = None):
     return get_chroma_client().get_or_create_collection(
-        name=name,
+        name=name or settings.chroma_collection,
         metadata={"hnsw:space": "cosine"},
     )
 
@@ -65,7 +65,7 @@ def _deduplicate(chunks: List[Chunk]) -> List[Chunk]:
     return out
 
 
-def embed_and_index_chunks(chunks: List[Chunk], collection_name: str = "annual_reports") -> None:
+def embed_and_index_chunks(chunks: List[Chunk], collection_name: Optional[str] = None) -> None:
     if not chunks:
         return
 
@@ -109,10 +109,17 @@ def embed_and_index_chunks(chunks: List[Chunk], collection_name: str = "annual_r
         bt = texts[i:i + _ENCODE_BATCH_SIZE]
         bi = ids[i:i + _ENCODE_BATCH_SIZE]
         bm = metadatas[i:i + _ENCODE_BATCH_SIZE]
-        embeddings = model.encode(bt, show_progress_bar=False, batch_size=_ENCODE_BATCH_SIZE).tolist()
+        embeddings = model.encode(
+            bt, show_progress_bar=False, batch_size=_ENCODE_BATCH_SIZE, normalize_embeddings=True
+        ).tolist()
         collection.upsert(ids=bi, documents=bt, embeddings=embeddings, metadatas=bm)
 
-    logger.info(f"Indexed {len(final_chunks)} chunks into '{collection_name}'")
+    # Return PyTorch's cached GPU memory so Ollama can keep the whole LLM on the 4 GB GPU
+    if model.device.type == "cuda":
+        import torch
+        torch.cuda.empty_cache()
+
+    logger.info(f"Indexed {len(final_chunks)} chunks into '{collection.name}'")
 
 
 def retrieve_relevant_chunks(
@@ -120,7 +127,7 @@ def retrieve_relevant_chunks(
     filing_ids: Optional[List[str]] = None,
     chunk_type: Optional[str] = "qa",
     top_k: int = 8,
-    collection_name: str = "annual_reports",
+    collection_name: Optional[str] = None,
 ) -> List[dict]:
     model = get_embedding_model()
     collection = _get_or_create_collection(collection_name)
@@ -128,8 +135,50 @@ def retrieve_relevant_chunks(
     if collection.count() == 0:
         return []
 
-    query_embedding = model.encode([query], show_progress_bar=False).tolist()
+    # bge models are trained with an instruction prefix on the query side only
+    query_embedding = model.encode(
+        [settings.embedding_query_prefix + query], show_progress_bar=False, normalize_embeddings=True
+    ).tolist()
 
+    where_filter = _build_where(filing_ids, chunk_type)
+
+    results = collection.query(
+        query_embeddings=query_embedding,
+        n_results=min(top_k, collection.count()),
+        where=where_filter,
+        include=["documents", "metadatas", "distances"],
+    )
+
+    chunks = []
+    if results["documents"]:
+        for cid, doc, meta, dist in zip(
+            results["ids"][0],
+            results["documents"][0],
+            results["metadatas"][0],
+            results["distances"][0],
+        ):
+            chunks.append({"id": cid, "text": doc, "metadata": meta, "score": 1 - dist})
+    return chunks
+
+
+def get_filing_chunks(
+    filing_ids: List[str],
+    chunk_type: Optional[str] = "qa",
+    collection_name: Optional[str] = None,
+) -> List[dict]:
+    """All stored chunks for the given filings — the corpus for BM25 keyword search."""
+    collection = _get_or_create_collection(collection_name)
+    res = collection.get(
+        where=_build_where(filing_ids, chunk_type),
+        include=["documents", "metadatas"],
+    )
+    return [
+        {"id": cid, "text": doc, "metadata": meta}
+        for cid, doc, meta in zip(res["ids"], res["documents"], res["metadatas"])
+    ]
+
+
+def _build_where(filing_ids: Optional[List[str]], chunk_type: Optional[str]) -> Optional[dict]:
     where_filter: dict = {}
     if filing_ids and chunk_type:
         where_filter = {"$and": [
@@ -140,26 +189,10 @@ def retrieve_relevant_chunks(
         where_filter = {"filing_id": {"$in": filing_ids}}
     elif chunk_type:
         where_filter = {"chunk_type": {"$eq": chunk_type}}
-
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=min(top_k, collection.count()),
-        where=where_filter if where_filter else None,
-        include=["documents", "metadatas", "distances"],
-    )
-
-    chunks = []
-    if results["documents"]:
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            chunks.append({"text": doc, "metadata": meta, "score": 1 - dist})
-    return chunks
+    return where_filter or None
 
 
-def delete_filing_chunks(filing_id: str, collection_name: str = "annual_reports") -> None:
+def delete_filing_chunks(filing_id: str, collection_name: Optional[str] = None) -> None:
     try:
         collection = _get_or_create_collection(collection_name)
         collection.delete(where={"filing_id": {"$eq": filing_id}})

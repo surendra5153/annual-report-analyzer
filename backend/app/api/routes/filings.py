@@ -1,10 +1,12 @@
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -29,44 +31,218 @@ def _run_pipeline_bg(filing_id: str, prior_filing_id: Optional[str]):
     finally:
         db.close()
 
-def _extract_pdf_text(path: str, max_pages: int = 3) -> str:
-    """Return plain text from the first *max_pages* pages of a PDF."""
+def _sample_pdf_pages(path: str, head: int = 5, spread: int = 20) -> tuple[list[str], int]:
+    """Return (page_texts, page_count) for the first *head* pages plus *spread*
+    pages evenly spaced across the document.
+
+    Exchange filings often open with a cover letter and an AGM notice, so the
+    report itself (and its statements) can start dozens of pages in.
+    """
     try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(path)
-        pages = min(len(doc), max_pages)
-        parts = []
-        for i in range(pages):
-            parts.append(doc[i].get_text("text"))
+        import pymupdf
+        doc = pymupdf.open(path)
+        n = len(doc)
+        idx = set(range(min(n, head)))
+        if n > head and spread:
+            step = max(1, (n - head) // spread)
+            idx.update(range(head, n, step))
+        pages = [doc[i].get_text("text") for i in sorted(idx)]
         doc.close()
-        return "\n".join(parts)[:4000]   # cap at 4k chars for faster LLM call
-    except Exception as e:
-        return ""
+        return pages, n
+    except Exception:
+        return [], 0
 
 
-def _detect_metadata_from_text(text: str) -> DetectResponse:
-    """Call the LLM to extract filing metadata and validate the PDF."""
-    from app.core.llm_client import chat_complete_json
+# Distinct signals that a document is an annual report / financial filing.
+_APOS = "['’�]?"
+_FINANCIAL_SIGNALS = {
+    "annual_report":  rf"annual report|form 10-k|form 20-f",
+    "balance_sheet":  rf"balance sheet|statement of financial position",
+    "profit_loss":    rf"statement of profit and loss|profit and loss|income statement",
+    "cash_flow":      rf"cash flow",
+    "auditor":        rf"independent auditor|auditor{_APOS}s{_APOS} report",
+    "notes":          rf"notes to (?:the )?(?:standalone |consolidated )?financial statements",
+    "board_report":   rf"board{_APOS}s report|directors{_APOS} report|board of directors",
+    "mdna":           rf"management discussion",
+    "governance":     rf"corporate governance",
+    "cin":            rf"\bcin\b",
+    "period":         rf"financial year|fiscal year|\bfy\s?\d{{2}}",
+    "inr_units":      rf"₹|\bcrores?\b|\blakhs?\b",
+}
+_STRONG_EVIDENCE = 4   # distinct signals needed to accept regardless of the LLM
+
+
+def _financial_evidence(pages: list[str], page_count: int) -> tuple[set[str], list[int]]:
+    """Return (distinct signals found, per-page signal counts)."""
     import re
+    found: set[str] = set()
+    per_page = []
+    for text in pages:
+        low = text.lower()
+        hits = {k for k, pat in _FINANCIAL_SIGNALS.items() if re.search(pat, low)}
+        found |= hits
+        per_page.append(len(hits))
+    if page_count >= 40:
+        found.add("long_document")
+    return found, per_page
 
-    # Quick pattern-based detection for common cases (much faster than LLM)
-    lowered = text.lower()
-    
+
+_REPORT_SUBJECT = re.compile(
+    r"annual\s+report|integrated\s+(?:annual\s+)?report|form\s+10-?k|form\s+20-?f"
+    r"|business\s+responsibility.{0,40}report|financial\s+statements|regulation\s*34\b",
+    re.IGNORECASE,
+)
+_SUBJECT_LINE = re.compile(r"^\s*sub(?:ject)?\s*[:\-.]\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+
+
+def _first_page(pages: list[str]) -> str:
+    """First of the opening pages with real text — image-only covers fall through."""
+    for text in pages[:3]:
+        if len(text.strip()) >= 80:
+            return text
+    return pages[0] if pages else ""
+
+
+def _subject_from_first_page(text: str) -> tuple[Optional[str], bool]:
+    """(subject, says_annual_report) from a cover letter's 'Sub:' line or the cover title.
+
+    BSE/NSE filings open with a letter to the exchange whose subject names the
+    document ("Sub: Annual Report for FY 2024-25"); standalone reports open with
+    a title page. Either way page 1 says what the document is.
+    """
+    lines = [" ".join(l.split()) for l in text.splitlines() if l.strip()]
+    m = _SUBJECT_LINE.search(text)
+    if m:
+        # Subjects often wrap onto a second line
+        i = next((k for k, l in enumerate(lines) if l.lower().startswith("sub")), 0)
+        subject = " ".join([m.group(1).strip()] + lines[i + 1:i + 2])[:160]
+        return subject, bool(_REPORT_SUBJECT.search(subject))
+    title = " ".join(lines[:8])
+    hit = _REPORT_SUBJECT.search(title)
+    if hit:
+        return hit.group(0), True
+    return None, False
+
+
+def _classify_first_page(text: str) -> tuple[Optional[str], Optional[bool]]:
+    """Ask the LLM about page 1 only. Returns (subject, is_annual_report); None if the call fails."""
+    from app.core.llm_client import chat_complete_json
+    try:
+        data = chat_complete_json(
+            messages=[
+                {"role": "system", "content": (
+                    "This is the FIRST PAGE of an uploaded PDF. State its subject in a few words "
+                    "and whether the document is a company's annual report / annual financial "
+                    "filing (annual report, integrated report, 10-K, 20-F). A cover letter to a "
+                    "stock exchange whose subject is the annual report counts as yes.\n"
+                    "Schema: {subject: str, is_annual_report: bool}"
+                )},
+                {"role": "user", "content": text.strip()[:1500]},
+            ],
+            max_tokens=60,
+        )
+        verdict = data.get("is_annual_report")
+        return data.get("subject"), (bool(verdict) if verdict is not None else None)
+    except Exception:
+        return None, None
+
+
+def _page1_verdict(pages: list[str]) -> tuple[Optional[str], Optional[bool]]:
+    """Decide the document type from the first page: regex first, LLM only if undecided."""
+    first = _first_page(pages)
+    subject, says_report = _subject_from_first_page(first)
+    if says_report:
+        return subject, True
+    llm_subject, verdict = _classify_first_page(first)
+    return llm_subject or subject, verdict
+
+
+def _confidence(page1_yes: bool, strong: bool) -> str:
+    if page1_yes and strong:
+        return "high"
+    return "medium" if page1_yes or strong else "low"
+
+
+def _llm_excerpt(pages: list[str], per_page: list[int], limit: int = 3000) -> str:
+    """Cover page plus the pages densest in financial signals, capped at *limit* chars."""
+    if not pages:
+        return ""
+    picks = [0] + sorted(range(1, len(pages)), key=lambda i: -per_page[i])[:2]
+    share = limit // len(picks)
+    return "\n---\n".join(pages[i].strip()[:share] for i in picks)
+
+
+def _year_from_filename(filename: str) -> Optional[int]:
+    """'Reliance FY26.pdf' → 2026, 'AR 2024-25.pdf' → 2025, 'HAL FY2025.pdf' → 2025."""
+    import re
+    m = re.search(r"(20\d{2})\s*[-_–]\s*(\d{2})(?!\d)", filename)
+    if m:
+        return 2000 + int(m.group(2))
+    m = re.search(r"FY\s*[-_]?\s*(?:20)?(\d{2})(?!\d)", filename, re.IGNORECASE)
+    if m:
+        return 2000 + int(m.group(1))
+    m = re.search(r"(?<!\d)(20\d{2})(?!\d)", filename)
+    return int(m.group(1)) if m else None
+
+
+_COMPANY_LINE = re.compile(r"\s*[A-Z][A-Za-z&.,'\- ]{2,60}\b(?:Limited|Ltd\.?)\s*")
+_NOT_ISSUER = re.compile(r"stock exchange|\bbse\b|\bnse\b|depository|registrar|share transfer", re.IGNORECASE)
+
+
+def _company_from_pages(pages: list[str]) -> Optional[str]:
+    """The issuer's name: page 1's letterhead / cover if it has one, else the most
+    frequent short '… Limited' line (usually the running page header).
+
+    Conglomerate reports repeat subsidiaries' names in headers more often than
+    the parent's, so the first page is trusted first.
+    """
+    from collections import Counter
+    head = [l for l in _first_page(pages).splitlines() if l.strip()][:15]
+    for line in head:
+        if _COMPANY_LINE.fullmatch(line) and not _NOT_ISSUER.search(line):
+            return " ".join(line.split())
+    names = Counter(
+        " ".join(line.split())
+        for text in pages for line in text.splitlines()
+        if _COMPANY_LINE.fullmatch(line) and not _NOT_ISSUER.search(line)
+    )
+    return names.most_common(1)[0][0] if names else None
+
+
+def _detect_metadata_from_text(pages: list[str], page_count: int, filename: str = "") -> DetectResponse:
+    """Validate the PDF (page 1 decides) and extract filing metadata (patterns + LLM)."""
+    from app.core.llm_client import chat_complete_json
+
+    signals, per_page = _financial_evidence(pages, page_count)
+    strong = len(signals) >= _STRONG_EVIDENCE
+
     # Quick reject non-financial docs
-    if not any(kw in lowered for kw in [
-        "annual report", "balance sheet", "profit and loss", "income statement",
-        "cash flow", "auditor", "fiscal year", "financial statements",
-        "chairman", "board of directors", "financial position"
-    ]):
+    if not signals - {"long_document"}:
         return DetectResponse(
             is_financial_report=False,
             rejection_reason="Document does not appear to be a financial report",
             confidence="medium",
         )
-    
+
+    # The document type is decided from page 1 alone. Strong structural evidence
+    # elsewhere still overrides a "no" (a 3B model is easily fooled by AGM notices);
+    # if the LLM call fails we accept on the keyword evidence, at low confidence.
+    subject, page1 = _page1_verdict(pages)
+    is_financial = bool(page1) or strong or page1 is None
+    if not is_financial:
+        return DetectResponse(
+            is_financial_report=False,
+            rejection_reason=(f"Page 1 looks like: '{subject}', not an annual report" if subject
+                              else "Document does not appear to be a financial report"),
+            confidence="medium",
+        )
+    confidence = _confidence(bool(page1), strong)
+
+    text = "\n".join(pages[:3])
+
     # Try pattern-based extraction first (instant)
     patterns = {
-        "fiscal_year": re.compile(r'\b(?:FY|fiscal year|for the year ended|year ending)\s*[:\-]?\s*(?:20)?(\d{2})(?:\s*[-/]\s*(?:20)?(\d{2}))?', re.IGNORECASE),
+        "fiscal_year": re.compile(r'\b(?:FY|fiscal year|financial year|for the year ended|year ending)\s*[:\-]?\s*(?:20)?(\d{2})(?:\s*[-/]\s*(?:20)?(\d{2}))?', re.IGNORECASE),
         "currency": re.compile(r'\b(INR|USD|EUR|GBP|JPY|CNY|₹|\$|€|£)\b'),
         "unit_scale": re.compile(r'\((?:in\s+)?(crores?|lakhs?|millions?|billions?)\)', re.IGNORECASE),
     }
@@ -93,57 +269,55 @@ def _detect_metadata_from_text(text: str) -> DetectResponse:
     # Extract unit scale
     unit_match = patterns["unit_scale"].search(text[:1500])
     if unit_match:
-        quick_data["unit_scale"] = unit_match.group(1).lower().rstrip('s')
+        quick_data["unit_scale"] = unit_match.group(1).lower().rstrip('s') + 's'   # match the UI's options
 
     system_prompt = (
-        "Extract metadata from financial report PDF text. Return JSON only.\n\n"
-        "Schema: {is_financial_report: bool, rejection_reason: str|null, "
-        "company_name: str|null, ticker: str|null, fiscal_year: int|null, "
-        "currency: str|null, unit_scale: str|null, report_type: str|null, confidence: str}\n\n"
+        "Extract metadata from annual report PDF text. Return JSON only.\n\n"
+        "Schema: {company_name: str|null, ticker: str|null, fiscal_year: int|null, "
+        "currency: str|null, unit_scale: str|null, report_type: str|null}\n\n"
         "Rules:\n"
-        "- is_financial_report=false if not annual report/10-K/20-F\n"
         "- fiscal_year = year period ENDS (FY 2023-24 → 2024)\n"
         "- unit_scale: crores|lakhs|millions|billions|units\n"
-        "- currency: INR, USD, EUR, etc.\n"
-        "- confidence: high|medium|low"
+        "- currency: INR, USD, EUR, etc."
     )
+
+    if fy := _year_from_filename(filename):
+        quick_data.setdefault("fiscal_year", fy)
+    if name := _company_from_pages(pages):
+        quick_data["company_name"] = name
 
     try:
         data = chat_complete_json(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text[:2500]},  # Limit to 2.5k chars for speed
+                {"role": "user", "content": _llm_excerpt(pages, per_page)},
             ],
             max_tokens=250,
         )
-        
-        # Merge pattern-based results with LLM results (LLM takes precedence)
+
+        # Merge pattern-based results with LLM results. The LLM takes precedence,
+        # except for company and year: the running page header and "FY 2024-25"
+        # parse deterministically, while the 3B model says "Your Company" or
+        # takes the start year.
         result = {**quick_data, **{k: v for k, v in data.items() if v is not None}}
-        
-        return DetectResponse(
-            is_financial_report=bool(result.get("is_financial_report", True)),
-            rejection_reason=result.get("rejection_reason"),
-            company_name=result.get("company_name"),
-            ticker=result.get("ticker"),
-            fiscal_year=result.get("fiscal_year"),
-            currency=result.get("currency", "INR"),
-            unit_scale=result.get("unit_scale", "crores"),
-            report_type=result.get("report_type"),
-            confidence=result.get("confidence", "medium"),
-        )
-    except Exception as e:
+        for key in ("company_name", "fiscal_year"):
+            if quick_data.get(key):
+                result[key] = quick_data[key]
+    except Exception:
         # Fallback to pattern-based if LLM fails
-        return DetectResponse(
-            is_financial_report=True,
-            rejection_reason=None,
-            company_name=None,
-            ticker=None,
-            fiscal_year=quick_data.get("fiscal_year"),
-            currency=quick_data.get("currency", "INR"),
-            unit_scale=quick_data.get("unit_scale", "crores"),
-            report_type="Annual Report",
-            confidence="low",
-        )
+        result = quick_data
+
+    return DetectResponse(
+        is_financial_report=True,
+        rejection_reason=None,
+        company_name=result.get("company_name"),
+        ticker=result.get("ticker"),
+        fiscal_year=result.get("fiscal_year"),
+        currency=result.get("currency", "INR"),
+        unit_scale=result.get("unit_scale", "crores"),
+        report_type=result.get("report_type") or "Annual Report",
+        confidence=confidence,
+    )
 
 
 def _get_or_create_company(name: str, ticker: Optional[str], sector: Optional[str], db: Session) -> Company:
@@ -197,13 +371,13 @@ async def detect_filing(file: UploadFile = File(...)):
         tmp_path = tmp.name
 
     try:
-        text = _extract_pdf_text(tmp_path, max_pages=3)
-        if not text.strip():
+        pages, page_count = _sample_pdf_pages(tmp_path)
+        if not "".join(pages).strip():
             return DetectResponse(
                 is_financial_report=False,
                 rejection_reason="Could not extract text from PDF (scanned/image-only?)",
             )
-        return _detect_metadata_from_text(text)
+        return _detect_metadata_from_text(pages, page_count, file.filename)
     finally:
         os.unlink(tmp_path)
         await file.seek(0)  # reset so the same file object can be read again if needed
@@ -297,6 +471,21 @@ def get_filing(filing_id: str, db: Session = Depends(get_db)):
     if not filing:
         raise HTTPException(status_code=404, detail="Filing not found")
     return filing
+
+
+@router.get("/{filing_id}/pdf")
+def get_filing_pdf(filing_id: str, db: Session = Depends(get_db)):
+    """Stream the original PDF (used by the in-app viewer for citation highlights)."""
+    filing = db.query(Filing).filter(Filing.id == filing_id).first()
+    if not filing:
+        raise HTTPException(status_code=404, detail="Filing not found")
+    if not filing.file_path or not os.path.exists(filing.file_path):
+        raise HTTPException(status_code=404, detail="PDF file is no longer on disk")
+    return FileResponse(
+        filing.file_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filing.file_name}"'},
+    )
 
 
 @router.delete("/{filing_id}", status_code=204)

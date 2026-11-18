@@ -61,3 +61,7 @@ logs/
 
 # ── Alembic versions (keep structure, not generated migrations) ────────────
 backend/alembic/versions/*.py
+
+# ── ML workspace ──────────────────────────────────────────────────────────
+ml/data/
+models/

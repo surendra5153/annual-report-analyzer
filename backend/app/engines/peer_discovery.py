@@ -2,23 +2,19 @@
 Auto Peer Discovery Engine
 Suggests comparable companies by embedding similarity over business descriptions.
 """
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 
 from sentence_transformers import SentenceTransformer
 from loguru import logger
 import numpy as np
 
-from app.core.config import settings
-
-_model: Optional[SentenceTransformer] = None
+from app.engines.embedding import get_embedding_model
 
 
 def _get_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(settings.embedding_model)
-    return _model
+    # Share the retrieval embedder instead of loading a second copy
+    return get_embedding_model()
 
 
 @dataclass

@@ -90,7 +90,13 @@ def compare_filings(
         if not company:
             continue
 
-        norm_val = _normalize_value(kpi.value, filing.unit_scale, filing.currency)
+        # Cleaned KPIs carry their own unit: money is ₹ crore; ratios / % / per-share
+        # values are scale-free and must not be multiplied by a unit factor.
+        if kpi.unit in ("x", "%", "₹/share"):
+            norm_val, unit_scale = kpi.value, kpi.unit
+        else:
+            unit_scale = "crores" if kpi.unit == "₹ crore" else filing.unit_scale
+            norm_val = _normalize_value(kpi.value, unit_scale, filing.currency)
         point = NormalizedKPI(
             company_id=company.id,
             company_name=company.name,
@@ -99,7 +105,7 @@ def compare_filings(
             raw_value=kpi.value,
             normalized_value=norm_val,
             currency=filing.currency,
-            unit_scale=filing.unit_scale,
+            unit_scale=unit_scale,
         )
         kpi_groups.setdefault(kpi.name, []).append(point)
 

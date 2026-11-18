@@ -1,0 +1,76 @@
+{
+  "raw_pages": 2258,
+  "clean_pages": 2199,
+  "reports": 6,
+  "companies": 4,
+  "chars_removed_pct": 3.76,
+  "header_footer_lines_removed": 3618,
+  "page_number_lines_removed": 1779,
+  "hyphen_joins": 544,
+  "empty_pages_removed": 57,
+  "duplicate_pages_removed": 2,
+  "quality_audit": {
+    "empty pages (< 50 chars)": 56,
+    "pages with ligatures (ﬁ ﬂ ﬀ)": 88,
+    "pages with legacy ₹ glyph (`)": 851,
+    "pages with 'Rs.' / 'INR' notation": 19,
+    "pages with unicode dashes (– — −)": 422,
+    "pages with curly quotes (’ ”)": 1247,
+    "pages with line-break hyphenation": 267,
+    "exact-duplicate pages": 4,
+    "missing values (any column)": 0
+  },
+  "class_counts": {
+    "crore": 329
+  },
+  "imbalance_ratio": 91.7,
+  "class_weights": {
+    "balance_sheet": 15.707,
+    "profit_loss": 7.094,
+    "cash_flow": 16.915,
+    "equity_changes": 24.433,
+    "notes": 0.267,
+    "auditor_report": 1.392,
+    "directors_report": 0.894,
+    "mda": 2.094,
+    "corporate_governance": 1.009,
+    "other": 0.379
+  },
+  "splits": {
+    "train": 1798,
+    "test": 301,
+    "val": 100
+  },
+  "split_companies": {
+    "test": [
+      "Bharti Airtel Ltd."
+    ],
+    "train": [
+      "Adani Enterprises Ltd.",
+      "Hindustan Aeronautics Ltd."
+    ],
+    "val": [
+      "ADARSH PLANT PROTECT LIMITED"
+    ]
+  },
+  "kpi_rows_raw": 120,
+  "kpi_rows_clean": 107,
+  "kpi_rule_counts": {
+    "consistency": 14,
+    "derived": 5,
+    "domain_range": 1,
+    "recompute": 4,
+    "scale": 68,
+    "sign": 2,
+    "stale_copy": 3
+  },
+  "report_units": {
+    "ADARSH PLANT PROTECT LIMITED 2026": "lakh",
+    "Adani Enterprises Ltd. 2026": "crore",
+    "Hindustan Aeronautics Ltd. 2025": "lakh",
+    "Bharti Airtel Ltd. 2026": "million",
+    "Hindustan Aeronautics Ltd. 2026": "lakh",
+    "Adani Enterprises Ltd. 2025": "crore"
+  },
+  "kpi_missingness": 0.314
+}

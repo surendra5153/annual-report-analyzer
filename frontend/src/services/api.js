@@ -78,6 +78,61 @@ export const askQuestion = (question, filingIds, conversationHistory = null) =>
     ...(conversationHistory ? { conversation_history: conversationHistory } : {}),
   }).then(r => r.data)
 
+/**
+ * Streaming Q&A over Server-Sent Events (POST, so fetch + ReadableStream).
+ * Calls onEvent for each event: {type:'sources'|'token'|'done'|'error', ...}.
+ * Returns an AbortController-compatible abort function.
+ */
+export function streamQuestion({ question, filingIds, conversationHistory, onEvent }) {
+  const controller = new AbortController()
+  ;(async () => {
+    try {
+      const res = await fetch(`${baseURL}/qa/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          filing_ids: filingIds,
+          ...(conversationHistory?.length ? { conversation_history: conversationHistory } : {}),
+        }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        onEvent({ type: 'error', message: body.detail || `HTTP ${res.status}` })
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop()
+        for (const e of events) {
+          const line = e.trim()
+          if (line.startsWith('data: ')) onEvent(JSON.parse(line.slice(6)))
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') onEvent({ type: 'error', message: err.message })
+    }
+  })()
+  return () => controller.abort()
+}
+
+// ── PDF ────────────────────────────────────────────────────────────────────
+export const filingPdfUrl = (filingId) => `${baseURL}/filings/${filingId}/pdf`
+
+// ── ML / Model Lab ─────────────────────────────────────────────────────────
+export const getMlHealth = () => api.get('/ml/health').then(r => r.data)
+export const getMlMetrics = () => api.get('/ml/metrics').then(r => r.data)
+export const getMlEda = () => api.get('/ml/eda').then(r => r.data)
+export const getMlPreprocessing = () => api.get('/ml/preprocessing').then(r => r.data)
+export const mlFigureUrl = (name) => `${baseURL}/ml/figures/${name}`
+
 // ── Comparison ─────────────────────────────────────────────────────────────
 export const compareFilings = (filingIds, kpiNames) =>
   api.post('/comparison/', { filing_ids: filingIds, kpi_names: kpiNames }).then(r => r.data)

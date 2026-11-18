@@ -30,3 +30,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def sync_added_columns() -> None:
+    """
+    Tiny additive migration: `create_all` creates missing tables but never adds
+    columns to existing ones. Add any nullable model columns the DB lacks
+    (SQLite and Postgres both support ALTER TABLE ... ADD COLUMN).
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing and col.nullable:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {ddl}'))

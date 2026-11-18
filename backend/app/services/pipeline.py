@@ -20,6 +20,7 @@ from app.engines.kpi_extractor import extract_kpis
 from app.engines.risk_classifier import classify_risks
 from app.engines.footnote_engine import run_footnote_engine
 from app.engines.anomaly_detector import detect_anomalies
+from app.services.kpi_cleaning import clean_filing_kpis
 
 STAGES = [
     ("parsing",        "Parsing PDF",              10),
@@ -141,6 +142,12 @@ def run_full_pipeline(filing_id: str, db: Session, prior_filing_id: Optional[str
                 category=kpi.category,
             ))
         db.commit()
+        # Unit normalisation + accounting-consistency rules (same as notebook 01)
+        try:
+            clean_filing_kpis(filing, [p.text for p in doc.pages], db)
+        except Exception as e:  # never fail the whole pipeline on cleaning
+            logger.warning(f"KPI cleaning skipped: {e}")
+            db.rollback()
         logger.info(f"[timing] kpi_extraction: {time.time()-t0:.1f}s  ({len(kpi_results)} KPIs)")
 
         # ── Stage 6: Risk classification ───────────────────────────────────

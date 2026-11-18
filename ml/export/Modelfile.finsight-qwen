@@ -1,0 +1,7 @@
+# Local serving profile for the Q&A model (no weight changes):
+#   ollama create finsight-qwen -f ml/export/Modelfile.finsight-qwen
+# Ollama's default 4,096-token context is too small once whole statement pages
+# are added as sources (~4–6k tokens); 8,192 fits a 4 GB GPU (KV cache ≈ 0.3 GB).
+FROM qwen2.5:3b
+PARAMETER num_ctx 8192
+PARAMETER temperature 0

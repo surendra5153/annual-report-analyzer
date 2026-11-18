@@ -1,0 +1,14 @@
+# ml/ workspace — data preprocessing, EDA, model training & evaluation
+# (the backend's own requirements are in backend/requirements.txt)
+pymupdf
+pandas
+numpy
+scipy
+scikit-learn
+matplotlib
+seaborn
+wordcloud
+nbformat
+nbconvert
+ipykernel
+httpx

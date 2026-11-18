@@ -7,12 +7,13 @@ from loguru import logger
 import os
 
 from app.core.config import settings
-from app.api.routes import companies, filings, qa, comparison
+from app.api.routes import companies, filings, qa, comparison, ml
 from app.api.routes.jobs import router as jobs_router
-from app.db.database import Base, engine
+from app.db.database import Base, engine, sync_added_columns
 
 # Auto-create all tables (SQLite friendly)
 Base.metadata.create_all(bind=engine)
+sync_added_columns()
 
 app = FastAPI(
     title="Annual Report Analysis System",
@@ -35,6 +36,7 @@ app.include_router(filings.router,   prefix="/api")
 app.include_router(qa.router,        prefix="/api")
 app.include_router(comparison.router, prefix="/api")
 app.include_router(jobs_router,      prefix="/api")
+app.include_router(ml.router,        prefix="/api")
 
 
 @app.get("/api/health")
@@ -57,6 +59,18 @@ def _prewarm_embedding_model():
         from app.engines.embedding import get_embedding_model
         model = get_embedding_model()
         model.encode(["warmup"], show_progress_bar=False)
-        logger.info("Embedding model pre-warmed and ready")
+        from app.ml.reranker import get_reranker
+        get_reranker()
+        logger.info("Embedding model + reranker pre-warmed and ready")
+        # Type every page of every processed report once, so the first numeric question is fast
+        from app.db.database import SessionLocal
+        from app.db.models import Filing, ProcessingStatus
+        from app.ml.statement_index import statement_index
+        db = SessionLocal()
+        try:
+            for f in db.query(Filing).filter(Filing.status == ProcessingStatus.COMPLETED).all():
+                statement_index(f.id)
+        finally:
+            db.close()
     except Exception as e:
         logger.warning(f"Embedding model pre-warm failed (non-fatal): {e}")

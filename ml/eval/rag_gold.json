@@ -1,0 +1,49 @@
+{
+  "description": "Hand-verified Q&A gold set. Every answer was read from the financial-statement page cited in `evidence` (not from the extracted KPI table, which is one of the systems under test). Values are in the report's printed unit (`unit`); `kind` = amount | per_share | percent | text | unanswerable.",
+  "filings": {
+    "adarsh26": {"id": "1c9e78bb-0f90-4881-9af9-83979c582e1a", "company": "Adarsh Plant Protect", "unit": "lakh"},
+    "adani25":  {"id": "9a88fab0-2586-44d2-b151-c9c65e144db9", "company": "Adani Enterprises FY25", "unit": "crore"},
+    "adani26":  {"id": "305f94a3-cb9e-41c1-816b-6b542d8ed933", "company": "Adani Enterprises FY26", "unit": "crore"},
+    "hal26":    {"id": "9820853e-5875-42a8-8001-2ad123f1b432", "company": "Hindustan Aeronautics FY26", "unit": "lakh"},
+    "hal25":    {"id": "45b2e41b-a5b7-4f11-9374-a46e2fdfd974", "company": "Hindustan Aeronautics FY25", "unit": "lakh"},
+    "airtel26": {"id": "8566cb3c-d316-44fb-9636-7c2f391c6f48", "company": "Bharti Airtel FY26", "unit": "million"}
+  },
+  "questions": [
+    {"id": "q01", "filing": "adarsh26", "question": "What was the total income for FY 2025-26?", "kind": "amount", "value": 1207.26, "evidence": "p.57 financial highlights: Total Income 1207.26 (₹ lakh)"},
+    {"id": "q02", "filing": "adarsh26", "question": "What was the revenue from operations in FY 2025-26?", "kind": "amount", "value": 1203.73, "evidence": "p.57 / p.20: Revenue from Operations 1203.73 (₹ lakh)"},
+    {"id": "q03", "filing": "adarsh26", "question": "What was the profit or loss after tax for FY 2025-26?", "kind": "amount", "value": -2.38, "evidence": "p.57: Profit after tax (2.38) (₹ lakh)"},
+    {"id": "q04", "filing": "adarsh26", "question": "What was the basic earnings per share for FY 2025-26?", "kind": "per_share", "value": -0.02, "evidence": "p.57: Basic EPS (0.02)"},
+    {"id": "q05", "filing": "adarsh26", "question": "Did the Board recommend a dividend for FY 2025-26?", "kind": "text", "accept": ["not recommended", "no dividend", "not recommend", "has not recommended", "did not recommend"], "evidence": "p.20: the Board has not recommended any dividend"},
+
+    {"id": "q06", "filing": "adani25", "question": "What was the consolidated total income for FY 2024-25?", "kind": "amount", "value": 100365.08, "evidence": "p.392 consolidated P&L: Total Income 1,00,365.08 (₹ crore)"},
+    {"id": "q07", "filing": "adani25", "question": "What was the consolidated revenue from operations in FY 2024-25?", "kind": "amount", "value": 97894.75, "evidence": "p.392: Revenue from Operations 97,894.75"},
+    {"id": "q08", "filing": "adani25", "question": "By what percentage did consolidated revenue from operations change from FY 2023-24 to FY 2024-25?", "kind": "percent", "value": 1.53, "tolerance": 0.3, "evidence": "p.392: 97,894.75 vs 96,420.98 → +1.53%"},
+    {"id": "q09", "filing": "adani25", "question": "What was the consolidated profit for the year FY 2024-25?", "kind": "amount", "value": 8004.99, "evidence": "p.392: Profit for the Year 8,004.99"},
+    {"id": "q10", "filing": "adani25", "question": "What was the standalone revenue from operations in FY 2024-25?", "kind": "amount", "value": 26708.97, "evidence": "p.288 standalone P&L: 26,708.97"},
+
+    {"id": "q11", "filing": "adani26", "question": "What were the consolidated total assets as at March 31, 2026?", "kind": "amount", "value": 261600.35, "evidence": "p.283 consolidated balance sheet: Total Assets 2,61,600.35"},
+    {"id": "q12", "filing": "adani26", "question": "What was the standalone profit for the year FY 2025-26?", "kind": "amount", "value": 11378.06, "evidence": "p.230 standalone P&L: Profit for the year 11,378.06"},
+    {"id": "q13", "filing": "adani26", "question": "What was the standalone basic earnings per share for FY 2025-26?", "kind": "per_share", "value": 93.26, "evidence": "p.230: Basic EPS 93.26"},
+    {"id": "q14", "filing": "adani26", "question": "What was the standalone total income for FY 2025-26?", "kind": "amount", "value": 25657.44, "evidence": "p.230: Total Income 25,657.44"},
+
+    {"id": "q15", "filing": "hal26", "question": "What was the consolidated total income for FY 2025-26?", "kind": "amount", "value": 3678795, "evidence": "p.321 consolidated P&L: Total Income 3678795 (₹ lakh)"},
+    {"id": "q16", "filing": "hal26", "question": "What was the consolidated revenue from operations for FY 2025-26?", "kind": "amount", "value": 3308882, "evidence": "p.321: Revenue from Operation 3308882"},
+    {"id": "q17", "filing": "hal26", "question": "What was the consolidated profit for FY 2025-26?", "kind": "amount", "value": 911552, "evidence": "p.321: Profit for the period 911552"},
+    {"id": "q18", "filing": "hal26", "question": "What were the consolidated total assets as at 31 March 2026?", "kind": "amount", "value": 13241459, "evidence": "p.319 consolidated balance sheet: Total Assets 13241459"},
+    {"id": "q19", "filing": "hal26", "question": "By what percentage did consolidated total income grow in FY 2025-26 compared with FY 2024-25?", "kind": "percent", "value": 9.68, "tolerance": 0.3, "evidence": "p.321: 3678795 vs 3354264 → +9.68%"},
+
+    {"id": "q20", "filing": "hal25", "question": "What was the consolidated total income for FY 2024-25?", "kind": "amount", "value": 3354264, "evidence": "p.328: Total Income 3354264"},
+    {"id": "q21", "filing": "hal25", "question": "What was the consolidated profit for FY 2024-25?", "kind": "amount", "value": 836405, "evidence": "p.328: Profit for the period 836405"},
+    {"id": "q22", "filing": "hal25", "question": "What were the consolidated total assets as at 31 March 2025?", "kind": "amount", "value": 10626685, "evidence": "p.326: Total Assets 10626685"},
+
+    {"id": "q23", "filing": "airtel26", "question": "What was the consolidated revenue from operations for FY 2025-26?", "kind": "amount", "value": 2109728, "evidence": "p.216 consolidated P&L: Revenue from operations 2,109,728 (₹ million)"},
+    {"id": "q24", "filing": "airtel26", "question": "What was the consolidated profit for the year FY 2025-26?", "kind": "amount", "value": 338228, "evidence": "p.216: Profit for the year 338,228"},
+    {"id": "q25", "filing": "airtel26", "question": "What were the consolidated total assets as at March 31, 2026?", "kind": "amount", "value": 5521516, "evidence": "p.216: Total assets 5,521,516"},
+    {"id": "q26", "filing": "airtel26", "question": "What was the basic earnings per share for FY 2025-26?", "kind": "per_share", "value": 45.96, "evidence": "p.216: Basic EPS 45.96"},
+
+    {"id": "u01", "filing": "adarsh26", "question": "What revenue does the company project for FY 2030-31?", "kind": "unanswerable"},
+    {"id": "u02", "filing": "hal26", "question": "How much Bitcoin does the company hold on its balance sheet?", "kind": "unanswerable"},
+    {"id": "u03", "filing": "airtel26", "question": "What was the revenue from the company's electric-car business?", "kind": "unanswerable"},
+    {"id": "u04", "filing": "adani25", "question": "What was the revenue of the company's Mars mining division?", "kind": "unanswerable"}
+  ]
+}

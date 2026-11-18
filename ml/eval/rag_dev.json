@@ -1,0 +1,37 @@
+{
+  "description": "DEV set for tuning the Q&A pipeline (notebook 06). Different questions from the TEST set (rag_gold.json), same rules: every answer read from a financial-statement page (`evidence`), values in the report's printed unit. Iterate on this set only; the test set is scored once at the end.",
+  "filings": {
+    "adarsh26": {"id": "1c9e78bb-0f90-4881-9af9-83979c582e1a", "company": "Adarsh Plant Protect", "unit": "lakh"},
+    "adani25":  {"id": "9a88fab0-2586-44d2-b151-c9c65e144db9", "company": "Adani Enterprises FY25", "unit": "crore"},
+    "adani26":  {"id": "305f94a3-cb9e-41c1-816b-6b542d8ed933", "company": "Adani Enterprises FY26", "unit": "crore"},
+    "hal26":    {"id": "9820853e-5875-42a8-8001-2ad123f1b432", "company": "Hindustan Aeronautics FY26", "unit": "lakh"},
+    "hal25":    {"id": "45b2e41b-a5b7-4f11-9374-a46e2fdfd974", "company": "Hindustan Aeronautics FY25", "unit": "lakh"},
+    "airtel26": {"id": "8566cb3c-d316-44fb-9636-7c2f391c6f48", "company": "Bharti Airtel FY26", "unit": "million"}
+  },
+  "questions": [
+    {"id": "d01", "filing": "adarsh26", "question": "What were the finance costs for FY 2025-26?", "kind": "amount", "value": 34.49, "evidence": "p.57: Less: Finance Costs 34.49 (₹ lakh)"},
+    {"id": "d02", "filing": "adarsh26", "question": "What was the other income in FY 2025-26?", "kind": "amount", "value": 3.53, "evidence": "p.57: Other Income 3.53"},
+    {"id": "d03", "filing": "adarsh26", "question": "By what percentage did revenue from operations change in FY 2025-26 compared with FY 2024-25?", "kind": "percent", "value": -31.20, "tolerance": 0.5, "evidence": "p.57: 1203.73 vs 1749.70 → −31.2%"},
+    {"id": "d04", "filing": "adani25", "question": "What were the consolidated finance costs for FY 2024-25?", "kind": "amount", "value": 5978.02, "evidence": "p.392: Finance Costs 5,978.02 (₹ crore)"},
+    {"id": "d05", "filing": "adani25", "question": "What was the consolidated total tax expense for FY 2024-25?", "kind": "amount", "value": 2968.52, "evidence": "p.392: Total Tax Expense 2,968.52"},
+    {"id": "d06", "filing": "adani25", "question": "What was the standalone profit for the year FY 2024-25?", "kind": "amount", "value": 6040.23, "evidence": "p.288: Profit for the year 6,040.23"},
+    {"id": "d07", "filing": "adani25", "question": "What was the standalone total income for FY 2024-25?", "kind": "amount", "value": 28313.04, "evidence": "p.288: Total Income 28,313.04"},
+    {"id": "d08", "filing": "adani26", "question": "What was the standalone revenue from operations for FY 2025-26?", "kind": "amount", "value": 23056.18, "evidence": "p.230: Revenue from Operations 23,056.18"},
+    {"id": "d09", "filing": "adani26", "question": "What was the standalone profit before tax from continuing operations for FY 2025-26?", "kind": "amount", "value": 12159.48, "evidence": "p.230: Profit before tax from Continuing Operations 12,159.48"},
+    {"id": "d10", "filing": "adani26", "question": "What was the consolidated total equity as at March 31, 2026?", "kind": "amount", "value": 89178.25, "evidence": "p.283: Total Equity 89,178.25"},
+    {"id": "d11", "filing": "adani26", "question": "What were the consolidated inventories as at March 31, 2026?", "kind": "amount", "value": 18712.98, "evidence": "p.283: Inventories 18,712.98"},
+    {"id": "d12", "filing": "adani26", "question": "By what percentage did standalone revenue from operations change in FY 2025-26?", "kind": "percent", "value": -13.68, "tolerance": 0.5, "evidence": "p.230: 23,056.18 vs 26,708.97 → −13.7%"},
+    {"id": "d13", "filing": "hal26", "question": "What was the consolidated other income for FY 2025-26?", "kind": "amount", "value": 369913, "evidence": "p.321: Other Income 369913 (₹ lakh)"},
+    {"id": "d14", "filing": "hal26", "question": "What was the consolidated employee benefits expense for FY 2025-26?", "kind": "amount", "value": 610768, "evidence": "p.321: Employee Benefits Expense 610768"},
+    {"id": "d15", "filing": "hal26", "question": "What was the consolidated profit before tax for FY 2025-26?", "kind": "amount", "value": 1215193, "evidence": "p.321: Profit/(loss) before tax 1215193"},
+    {"id": "d16", "filing": "hal26", "question": "What were the consolidated inventories as at 31 March 2026?", "kind": "amount", "value": 3085068, "evidence": "p.319: Inventories 3085068"},
+    {"id": "d17", "filing": "hal25", "question": "What was the consolidated revenue from operations for FY 2024-25?", "kind": "amount", "value": 3098095, "evidence": "p.328: Revenue from Operation 3098095"},
+    {"id": "d18", "filing": "hal25", "question": "By what percentage did consolidated total income grow in FY 2024-25?", "kind": "percent", "value": 3.92, "tolerance": 0.3, "evidence": "p.328: 3354264 vs 3227768 → +3.92%"},
+    {"id": "d19", "filing": "airtel26", "question": "What was the consolidated other income for FY 2025-26?", "kind": "amount", "value": 28173, "evidence": "p.216: Other income 28,173 (₹ million)"},
+    {"id": "d20", "filing": "airtel26", "question": "What were the consolidated network operating expenses for FY 2025-26?", "kind": "amount", "value": 397500, "evidence": "p.216: Network operating expenses 397,500"},
+    {"id": "d21", "filing": "airtel26", "question": "What was the consolidated profit attributable to owners of the parent for FY 2025-26?", "kind": "amount", "value": 266952, "evidence": "p.216: Owners of the Parent 266,952"},
+    {"id": "d22", "filing": "airtel26", "question": "What was the diluted earnings per share for FY 2025-26?", "kind": "per_share", "value": 44.37, "evidence": "p.216: Diluted EPS 44.37"},
+    {"id": "du1", "filing": "hal26", "question": "What was the company's revenue from operations in Antarctica?", "kind": "unanswerable"},
+    {"id": "du2", "filing": "adani26", "question": "What is the personal net worth of the company's chairman?", "kind": "unanswerable"}
+  ]
+}

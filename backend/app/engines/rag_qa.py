@@ -2,7 +2,8 @@
 RAG Q&A Engine  — v2
 ────────────────────
 Improvements over v1:
-  1. Hybrid retrieval  — semantic (ChromaDB) + keyword-boosted re-ranking
+  1. Hybrid retrieval  — BM25 (sparse) + bge embeddings (dense), merged with
+     Reciprocal Rank Fusion, then re-scored by a cross-encoder reranker
   2. Conversational memory — up to 4 prior turns passed as context
   3. Section-aware prompting — tells the LLM which report section each chunk is from
   4. Confidence scoring based on retrieval scores + source diversity
@@ -10,14 +11,19 @@ Improvements over v1:
   6. Suggested follow-up questions returned alongside the answer
 """
 import re
-from typing import List, Dict, Optional, Tuple
+import time
+from typing import Dict, Iterator, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 from loguru import logger
 
 from app.core.config import settings
-from app.core.llm_client import chat_complete_json, chat_complete
-from app.engines.embedding import retrieve_relevant_chunks
+from app.core.llm_client import chat_complete_json, chat_complete, chat_stream
+from app.engines.embedding import retrieve_relevant_chunks, get_filing_chunks
+from app.ml.bm25 import BM25
+from app.ml.fusion import reciprocal_rank_fusion
+from app.ml.reranker import rerank_scores
+from app.ml.statement_index import retrieve_statement_pages
 
 
 # ── Data classes ────────────────────────────────────────────────────────────
@@ -41,68 +47,110 @@ class QAResult:
     suggested_questions: List[str] = field(default_factory=list)
 
 
-# ── Hybrid retrieval helpers ────────────────────────────────────────────────
+# ── Hybrid retrieval ────────────────────────────────────────────────────────
 
-def _keyword_score(text: str, query: str) -> float:
-    """
-    Simple keyword boost: fraction of query words present in text.
-    Supplements semantic similarity for precise financial terms.
-    """
-    query_words = set(re.findall(r'\b\w+\b', query.lower()))
-    if not query_words:
-        return 0.0
-    text_lower = text.lower()
-    hits = sum(1 for w in query_words if w in text_lower)
-    return hits / len(query_words)
+# BM25 indexes are built from the filing's stored chunks and cached briefly,
+# since a chat session asks many questions against the same filings.
+_BM25_CACHE: Dict[Tuple[str, ...], Tuple[float, BM25, List[Dict]]] = {}
+_BM25_TTL_SECONDS = 600
+_BM25_CACHE_MAX = 8
+
+
+def _get_bm25(filing_ids: List[str]) -> Tuple[Optional[BM25], List[Dict]]:
+    key = tuple(sorted(filing_ids))
+    cached = _BM25_CACHE.get(key)
+    if cached and time.time() - cached[0] < _BM25_TTL_SECONDS:
+        return cached[1], cached[2]
+
+    corpus = get_filing_chunks(filing_ids, chunk_type="qa")
+    if not corpus:
+        return None, []
+    index = BM25([c["text"] for c in corpus])
+
+    if len(_BM25_CACHE) >= _BM25_CACHE_MAX:
+        _BM25_CACHE.pop(min(_BM25_CACHE, key=lambda k: _BM25_CACHE[k][0]))
+    _BM25_CACHE[key] = (time.time(), index, corpus)
+    return index, corpus
 
 
 def _hybrid_retrieve(
     query: str,
     filing_ids: List[str],
     top_k: int = 10,
+    mode: str = "hybrid",
 ) -> List[Dict]:
     """
-    Retrieve chunks semantically, then re-rank with keyword boost.
-    Returns up to top_k chunks sorted by hybrid score.
-    """
-    # Fetch more than needed so re-ranking has room to work
-    raw = retrieve_relevant_chunks(
-        query=query,
-        filing_ids=filing_ids,
-        chunk_type="qa",
-        top_k=min(top_k * 2, 20),
-    )
+    mode="dense" returns plain bge similarity search (the baseline compared in
+    notebook 05); mode="hybrid" (default) runs the full pipeline:
 
-    if not raw:
+    1. Dense: top-N chunks by bge cosine similarity (ChromaDB HNSW)
+    2. Sparse: top-N chunks by BM25
+    3. Reciprocal Rank Fusion of the two rankings
+    4. Cross-encoder rerank of the fused candidates → top_k
+
+    Each returned chunk carries `hybrid_score` in [0, 1] (reranker probability,
+    or the dense score if the reranker is unavailable), used for confidence.
+    """
+    n = settings.retrieval_candidates
+
+    dense = retrieve_relevant_chunks(query=query, filing_ids=filing_ids, chunk_type="qa", top_k=n)
+    if mode == "dense":
+        return [{**c, "hybrid_score": float(c.get("score", 0))} for c in dense[:top_k]]
+
+    sparse: List[Dict] = []
+    try:
+        index, corpus = _get_bm25(filing_ids)
+        if index is not None:
+            sparse = [corpus[i] for i, _ in index.top_k(query, n)]
+    except Exception as e:
+        logger.warning(f"BM25 retrieval failed, using dense only: {e}")
+
+    by_id: Dict[str, Dict] = {c["id"]: c for c in sparse}
+    by_id.update({c["id"]: c for c in dense})  # dense entries carry a cosine score
+    if not by_id:
         return []
 
-    # Compute hybrid scores
-    scored = []
-    for chunk in raw:
-        sem_score = float(chunk.get("score", 0.5))
-        kw_score  = _keyword_score(chunk["text"], query)
-        # 70% semantic + 30% keyword
-        hybrid = 0.7 * sem_score + 0.3 * kw_score
-        scored.append({**chunk, "hybrid_score": hybrid})
+    fused_ids = reciprocal_rank_fusion([[c["id"] for c in dense], [c["id"] for c in sparse]])
+    candidates = [by_id[i] for i in fused_ids[:n]]
 
-    scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    probs = rerank_scores(query, [c["text"] for c in candidates])
+    if probs is not None:
+        scored = [{**c, "hybrid_score": p} for c, p in zip(candidates, probs)]
+        scored.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    else:
+        # No reranker: keep RRF order, use dense cosine (0.3 for sparse-only hits)
+        scored = [{**c, "hybrid_score": float(c.get("score", 0.3))} for c in candidates]
+
     return scored[:top_k]
 
 
 # ── Context block builder ────────────────────────────────────────────────────
 
-def _build_context_block(chunks: List[Dict]) -> str:
+def _build_context_block(chunks: List[Dict], filing_labels: Optional[Dict[str, str]] = None) -> str:
+    """
+    filing_labels: {filing_id: "Company · FY2026 · amounts in ₹ lakh"} — tells the
+    model which report, year and unit each passage comes from, so it can state units.
+    """
     parts = []
     for i, c in enumerate(chunks):
         meta = c.get("metadata", {})
         page    = meta.get("page_number", "?")
-        filing  = meta.get("filing_id", "")[:8]   # short ID for readability
-        score   = c.get("hybrid_score", c.get("score", 0))
-        parts.append(
-            f"[Source {i+1} | Page {page} | Filing: ...{filing} | Score: {score:.2f}]\n"
-            f"{c['text']}"
-        )
+        fid     = meta.get("filing_id", "")
+        report  = (filing_labels or {}).get(fid, f"Filing ...{fid[:8]}")
+        # Short "[n]" handle first: models copy whatever header they see into the answer
+        parts.append(f"Source [{i+1}] — {report} · page {page}\n{c['text']}")
     return "\n\n".join(parts)
+
+
+_UNIT_RULES = (
+    "Every monetary amount MUST be written with the rupee sign and its unit, e.g. **₹1,207.26 lakh**; "
+    "take the unit from the source header ('amounts in ₹ …') unless the passage itself states another unit. "
+    "Do not convert units yourself (the app adds exact ₹ crore equivalents). "
+    "Prefer a line explicitly labelled with the asked item (e.g. 'Total Revenue') over figures from other tables. "
+    "Tables often show two years side by side: give the figure for the report's fiscal year and name the year; "
+    "mention the prior year only if it is clearly labelled. "
+    "Never add up figures from different years or different tables."
+)
 
 
 def _build_conversation_context(history: List[Dict]) -> str:
@@ -122,6 +170,7 @@ def _first_pass_answer(
     question: str,
     context: str,
     conversation_context: str = "",
+    use_facts: bool = False,
 ) -> Dict:
     conv_block = ""
     if conversation_context:
@@ -129,7 +178,8 @@ def _first_pass_answer(
 
     prompt = f"""You are a precise financial analyst assistant answering questions about annual reports.
 Use ONLY the provided source chunks. If the answer is not clearly supported by the sources, say so.
-Always cite source numbers when using information from them.{conv_block}
+Always cite source numbers when using information from them.
+{_UNIT_RULES}{(" " + _FACTS_RULE) if use_facts else ""}{conv_block}
 
 Source chunks:
 {context}
@@ -242,6 +292,8 @@ def answer_question(
     kpi_lookup: Optional[Dict[str, float]] = None,
     conversation_history: Optional[List[Dict]] = None,
     top_k: int = 10,
+    filing_labels: Optional[Dict[str, str]] = None,
+    kpi_facts: Optional[List[Dict]] = None,
 ) -> QAResult:
     """
     Answer a natural-language question with hybrid retrieval and source citations.
@@ -256,7 +308,7 @@ def answer_question(
     logger.info(f"RAG QA: '{question[:80]}' over {len(filing_ids)} filing(s)")
 
     # ── 1. Hybrid retrieval ───────────────────────────────────────────────
-    chunks = _hybrid_retrieve(query=question, filing_ids=filing_ids, top_k=top_k)
+    chunks = _with_kpi_facts(_hybrid_retrieve(query=question, filing_ids=filing_ids, top_k=top_k), kpi_facts)
 
     if not chunks:
         return QAResult(
@@ -271,12 +323,12 @@ def answer_question(
             ],
         )
 
-    context = _build_context_block(chunks)
+    context = _build_context_block(chunks, filing_labels)
     conv_ctx = _build_conversation_context(conversation_history or [])
 
     # ── 2. LLM answer pass ────────────────────────────────────────────────
     try:
-        result = _first_pass_answer(question, context, conv_ctx)
+        result = _first_pass_answer(question, context, conv_ctx, use_facts=bool(kpi_facts))
     except Exception as e:
         logger.error(f"QA failed: {e}")
         return QAResult(
@@ -313,3 +365,180 @@ def answer_question(
         kpi_verification_note=veri_note,
         suggested_questions=suggested_qs[:3],
     )
+
+
+# ── Streaming entry point (SSE chat) ──────────────────────────────────────────
+
+# Matches [3], [Source 3], [1, 2], [Sources 1 and 4], [Source 1 | <report> | Page 36] — small models vary the format
+_CITE_RE = re.compile(r"\[(?:sources?\s*)?(\d{1,2}(?:\s*(?:,|and|&)\s*\d{1,2})*)(?:\s*\|[^\]]*)?\]", re.IGNORECASE)
+
+
+_BARE_CITE_RE = re.compile(r"(?<!\[)\bSource\s+(\d{1,2})\b")
+
+
+def _cited_indices(text: str, n_sources: int) -> List[int]:
+    found = {int(d) for group in _CITE_RE.findall(text) for d in re.findall(r"\d+", group)}
+    found |= {int(n) for n in _BARE_CITE_RE.findall(text)}  # "Source 1" without brackets
+    return sorted(i for i in found if 1 <= i <= n_sources)
+
+
+_KPI_FACT_SCORE = 0.75  # retrieval-score stand-in for the verified KPI table (used by confidence)
+
+_STATEMENT_RULE = (
+    "Sources marked '— full page' are complete financial-statement pages: they are the most authoritative source. "
+    "Copy figures digit-for-digit exactly as printed (do not add, drop or regroup digits) and use the unit stated "
+    "in that page's header. "
+    "Find the row whose label matches the question, read the column headers to pick the column of the asked year, "
+    "and if such a page disagrees with the KPI table, use the statement page. For a percentage change, take both "
+    "years from the same statement row and show the calculation."
+)
+
+_FACTS_RULE = (
+    "Sources titled 'Extracted KPI table' list figures extracted from the financial statements; prefer them for "
+    "headline figures (revenue, profit, assets, EPS, ratios) and for year-on-year changes. If a statement passage "
+    "gives the exact item asked for with its scope (standalone / consolidated), use that passage and say which scope."
+)
+
+
+def system_prompt(kpi_facts: bool = False, statements: bool = False) -> str:
+    """
+    The Q&A system prompt. Single definition shared by the live engine and the
+    fine-tuning data builder (ml/finetune/build_sft.py) so training matches serving.
+    """
+    return (
+        "You are a precise financial analyst answering questions about annual reports. "
+        "Use ONLY the provided sources. Cite sources inline only as [1], [2] right after the fact they support "
+        "(never repeat the source title). "
+        "Copy numbers exactly as written in the sources, with their years. "
+        + _UNIT_RULES + " "
+        + (_FACTS_RULE + " " if kpi_facts else "")
+        + (_STATEMENT_RULE + " " if statements else "")
+        + "If the sources do not contain the answer, say it is not found in the report. "
+        "Use markdown bold for key figures."
+    )
+
+
+def _with_kpi_facts(chunks: List[Dict], kpi_facts: Optional[List[Dict]], last: bool = False) -> List[Dict]:
+    """
+    Add each filing's KPI table as a citable source — first (default) or last.
+    Small models anchor on Source [1]; when full statement pages are present the
+    (error-prone) KPI table goes last so the statements lead.
+    """
+    facts = [{
+        "id": f"kpi-{f['filing_id']}",
+        "text": f["text"],
+        "metadata": {"filing_id": f["filing_id"], "page_number": f.get("page_number") or 0, "chunk_type": "kpi_table"},
+        "hybrid_score": _KPI_FACT_SCORE,
+    } for f in (kpi_facts or [])]
+    return chunks + facts if last else facts + chunks
+
+
+def _table_reader_answer(question: str, filing_id: str) -> Optional[List[Dict]]:
+    """Events for a deterministic answer (app/ml/table_reader.py), or None to fall back to the LLM."""
+    from app.db.database import SessionLocal
+    from app.db.models import Filing
+    from app.ml.statement_index import focus_text, statement_index
+    from app.ml.table_reader import read, render_answer, source_excerpt
+
+    db = SessionLocal()
+    try:
+        f = db.query(Filing).filter(Filing.id == filing_id).first()
+        if not f or not f.file_path:
+            return None
+        try:
+            res = read(question, f.id, f.file_path, f.fiscal_year)
+        except Exception as e:  # never break chat on a parsing problem
+            logger.warning(f"Table reader failed: {e}")
+            return None
+    finally:
+        db.close()
+    if not res.confident:
+        logger.info(f"Table reader not confident ({res.reason}) → LLM")
+        return None
+    page_text = next((p["text"] for p in statement_index(filing_id) if p["page_number"] == res.page), "")
+    source = {
+        "index": 1, "kind": "statement_page", "page_number": res.page, "filing_id": filing_id,
+        "excerpt": source_excerpt(res), "text": focus_text(page_text, question, 3500), "score": 1.0,
+    }
+    return [
+        {"type": "sources", "sources": [source]},
+        {"type": "token", "text": render_answer(res)},
+        {"type": "done", "confidence": "high", "cited": [1], "mode": "table_reader"},
+    ]
+
+
+def stream_answer(
+    question: str,
+    filing_ids: List[str],
+    conversation_history: Optional[List[Dict]] = None,
+    top_k: int = 6,
+    filing_labels: Optional[Dict[str, str]] = None,
+    kpi_facts: Optional[List[Dict]] = None,
+    retrieval: str = "hybrid",
+    statement_pages: bool = False,
+    model: Optional[str] = None,
+    group_numbers: bool = True,
+    facts_with_statements: bool = True,
+    table_reader: bool = False,
+) -> Iterator[Dict]:
+    """
+    Same retrieval as answer_question, but the answer is streamed as plain
+    text with inline [n] source markers so the UI can render tokens live.
+
+    kpi_facts: verified KPI tables (app/services/qa_context.kpi_facts) offered as
+    extra sources; retrieval: "hybrid" (default) or "dense" (evaluation baseline).
+
+    Yields events:
+      {"type": "sources", "sources": [{index, kind, page_number, filing_id, excerpt, text, score}]}
+      {"type": "token",   "text": "..."}
+      {"type": "done",    "confidence": "...", "cited": [n, ...]}
+    """
+    # Whole statement pages for numeric questions (app/ml/statement_index.py); they replace two passages
+    # Deterministic path: a confident statement-cell reading is answered without the LLM
+    if table_reader and len(filing_ids) == 1:
+        det = _table_reader_answer(question, filing_ids[0])
+        if det is not None:
+            yield from det
+            return
+
+    stmt = retrieve_statement_pages(question, filing_ids, k=2, group_numbers=group_numbers) if statement_pages else []
+    passages = _hybrid_retrieve(query=question, filing_ids=filing_ids, top_k=top_k - (2 if stmt else 0), mode=retrieval)
+    if stmt and not facts_with_statements:
+        kpi_facts = None  # statement pages are authoritative; the extracted table only adds conflicting figures
+    chunks = _with_kpi_facts(stmt + passages, kpi_facts, last=bool(stmt))
+    yield {
+        "type": "sources",
+        "sources": [
+            {
+                "index": i + 1,
+                "kind": {"kpi_table": "kpi_table", "statement_page": "statement_page"}.get(
+                    c.get("metadata", {}).get("chunk_type"), "passage"),
+                "page_number": int(c.get("metadata", {}).get("page_number", 0)),
+                "filing_id": c.get("metadata", {}).get("filing_id", ""),
+                "excerpt": c["text"][:250].strip(),
+                "text": c["text"],  # full text: lets clients check that answer figures are grounded
+                "score": round(float(c.get("hybrid_score", 0)), 3),
+            }
+            for i, c in enumerate(chunks)
+        ],
+    }
+
+    if not chunks:
+        yield {"type": "token", "text": "I couldn't find relevant content in the selected filings."}
+        yield {"type": "done", "confidence": "low", "cited": []}
+        return
+
+    conv_ctx = _build_conversation_context(conversation_history or [])
+    conv_block = f"\nPrior conversation (for context only):\n{conv_ctx}\n" if conv_ctx else ""
+    messages = [
+        {"role": "system", "content": system_prompt(kpi_facts=bool(kpi_facts), statements=bool(stmt))},
+        {"role": "user", "content": f"{conv_block}\nSources:\n{_build_context_block(chunks, filing_labels)}\n\nQuestion: {question}"},
+    ]
+
+    answer_parts: List[str] = []
+    for delta in chat_stream(messages, max_tokens=800, model=model):
+        answer_parts.append(delta)
+        yield {"type": "token", "text": delta}
+
+    cited = _cited_indices("".join(answer_parts), len(chunks))
+    yield {"type": "done", "confidence": _compute_confidence("medium", chunks, cited), "cited": cited}
